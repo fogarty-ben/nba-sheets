@@ -1,0 +1,52 @@
+name: Nightly sheet update
+
+# Controls when the action will run. 
+on:
+  # Run on every push
+  push:
+
+  # Update at 12:00pm UTC every day
+  schedule:
+    - cron: '0 12 * * *'
+  
+  # Run manually from Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      # Runs a single command using the runners shell
+      - name: install python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8.4
+      - name: install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: parse secrets
+        run: python generate_secrets.py
+        env:
+          GKEY_AUTH_PROVIDER_X509_CERT_URL: ${{ secrets.GKEY_AUTH_PROVIDER_X509_CERT_URL }}
+          GKEY_AUTH_URI: ${{ secrets.GKEY_AUTH_URI }}
+          GKEY_CLIENT_EMAIL: ${{ secrets.GKEY_CLIENT_EMAIL }}
+          GKEY_CLIENT_ID: ${{ secrets.GKEY_CLIENT_ID }}
+          GKEY_CLIENT_X509_CERT_URL: ${{ secrets.GKEY_CLIENT_X509_CERT_URL }}
+          GKEY_PRIVATE_KEY: ${{ secrets.GKEY_PRIVATE_KEY }}
+          GKEY_PRIVATE_KEY_ID: ${{ secrets.GKEY_PRIVATE_KEY_ID }}
+          GKEY_PROJECT_ID: ${{ secrets.GKEY_PROJECT_ID }}
+          GKEY_TOKEN_URI: ${{ secrets.GKEY_TOKEN_URI }}
+          GKEY_TYPE: ${{ secrets.GKEY_TYPE }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          WORKSHEET_NAME: ${{ secrets.WORKSHEET_NAME }}
+      - name: execute script
+        run: python nba_sheets.py
