@@ -2,7 +2,7 @@
 
 Parse NBA standings (and a few random stats) from the Fox Sports website and write them to a Google Sheet.
 
-Ben Fogarty. 
+Ben Fogarty  
 5 December 2020
 
 # How it works
