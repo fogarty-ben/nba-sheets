@@ -193,7 +193,7 @@ def update_sheet(ws, standings, ty_ppg, kd_techs):
     # add headers if necessary
     for i, col in enumerate(standings.columns):
         cell = ws.acell(f'A{i + 1}')
-        if not cell.value == standings.columns[0]:
+        if not cell.value == col:
             ws.delete_rows(1)
             ws.insert_row(standings.columns.values.tolist(), index=1)
             break
