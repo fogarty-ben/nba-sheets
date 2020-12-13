@@ -87,11 +87,11 @@ def get_conference_standings(standings_tbl):
             entry[stat] = cells[loc].text.strip().rstrip('XYZ')
         
         data.append(entry)
-
     df = pd.DataFrame(data)
-    
+
     df['GB'] = df.GB.where(df.GB != '-', 0)
     df['TEAM'] = df.TEAM.map(NAMES_MAP)
+    
     df = df.astype({'GB': float,
                     'PCT': float,
                     'RANK': int})
@@ -190,16 +190,16 @@ def update_sheet(ws, standings, ty_ppg, kd_techs):
     ty_ppg (float): Trae Young's PPG
     kd_techs (int): Kevin Durant's technical fouls
     '''
-    # add headers if necessary
-    for i, col in enumerate(standings.columns):
-        cell = ws.acell(f'A{i + 1}')
-        if not cell.value == col:
-            ws.delete_rows(1)
-            ws.insert_row(standings.columns.values.tolist(), index=1)
-            break
-
     # update standings and tie breaks
     if isinstance(standings, pd.DataFrame):
+        # add headers if necessary
+        for i, col in enumerate(standings.columns):
+            cell = ws.acell(f'A{i + 1}')
+            if not cell.value == col:
+                ws.delete_rows(1)
+                ws.insert_row(standings.columns.values.tolist(), index=1)
+                break
+        # update rows
         ws.update('A2:J16', standings.values.tolist())
         ws.update_cell(17, 1,
                        f'Last updated: {pd.Timestamp.today().ctime()} UTC')
