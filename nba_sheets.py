@@ -90,11 +90,13 @@ def get_conference_standings(standings_tbl):
     df = pd.DataFrame(data)
 
     df['GB'] = df.GB.where(df.GB != '-', 0)
+    df['PCT'] = df.PCT.where(df.PCT != '-', 0)
     df['TEAM'] = df.TEAM.map(NAMES_MAP)
-    
+
     df = df.astype({'GB': float,
                     'PCT': float,
                     'RANK': int})
+
 
     return df
 
