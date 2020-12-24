@@ -20,7 +20,7 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-TY_FS_SHOOT_URL = 'https://www.foxsports.com/nba/trae-young-player-stats?category=scoring&seasonType=reg'
+TY_FS_AST_URL = 'https://www.foxsports.com/nba/trae-young-player-stats?category=assists&seasonType=reg'
 KD_FS_MISC_URL = 'https://www.foxsports.com/nba/kevin-durant-player-stats?category=misc&seasonType=reg'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
@@ -182,14 +182,14 @@ def get_sheet(service_key, ss_key, ws_title):
 
     return ws
 
-def update_sheet(ws, standings, ty_ppg, kd_techs):
+def update_sheet(ws, standings, ty_apg, kd_techs):
     '''
     Write updates to a Google Sheets worksheet.
 
     Inputs:
     ws (gspread.models.Worksheet): worksheet to update
     standings (pandas dataframe): standings from get_standings call
-    ty_ppg (float): Trae Young's PPG
+    ty_apg (float): Trae Young's APG
     kd_techs (int): Kevin Durant's technical fouls
     '''
     # update standings and tie breaks
@@ -211,9 +211,9 @@ def update_sheet(ws, standings, ty_ppg, kd_techs):
         ws.update_cell(19, 2, kd_techs)
         ws.update_cell(19, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(ty_ppg, float):
-        ws.update_cell(20, 1, 'Trae Young PPG:')
-        ws.update_cell(20, 2, ty_ppg)
+    if isinstance(ty_apg, float):
+        ws.update_cell(20, 1, 'Trae Young APG:')
+        ws.update_cell(20, 2, ty_apg)
         ws.update_cell(20, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
         
     ws.update_cell(21, 1, f'Automatically updated by {REF_LINK}')
@@ -226,10 +226,10 @@ if __name__ == '__main__':
         standings = None
 
     try:
-        ty_ppg = parse_fs_player_pg(TY_FS_SHOOT_URL, 'PPG', fxn=float)
+        ty_apg = parse_fs_player_pg(TY_FS_AST_URL, 'APG', fxn=float)
     except Exception as e:
-        print(f'TY PPG: {e}')
-        ty_ppg = None
+        print(f'TY APG: {e}')
+        ty_apg = None
 
     try:
         kd_techs = parse_fs_player_pg(KD_FS_MISC_URL, 'TECH', fxn=int)
@@ -241,10 +241,10 @@ if __name__ == '__main__':
     worksheet_name = SHEET_INFO['worksheet_name']
 
     ws = get_sheet(SERVICE_KEY_FP, sheet_id, worksheet_name)
-    update_sheet(ws, standings, ty_ppg, kd_techs)
+    update_sheet(ws, standings, ty_apg, kd_techs)
 
-    assert (isinstance(standings, pd.DataFrame) and isinstance(ty_ppg, float)
+    assert (isinstance(standings, pd.DataFrame) and isinstance(ty_apg, float)
             and isinstance(kd_techs, int)),\
            (f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
-            f'TY PPG: {isinstance(ty_ppg, float)}, ' +
+            f'TY APG: {isinstance(ty_apg, float)}, ' +
             f'KD Techs: {isinstance(kd_techs, int)}')
