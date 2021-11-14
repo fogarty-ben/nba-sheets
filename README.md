@@ -1,9 +1,10 @@
 # nba-sheets
 
-Parse NBA standings (and a few random stats) from the Fox Sports website and write them to a Google Sheet.
+Parse NBA standings (and a few random stats) from the Fox Sports & BBRef websites and write them to a Google Sheet.
 
 Ben Fogarty  
-5 December 2020
+Created: 5 December 2020
+Last updated: 13 November 2021
 
 # How it works
 

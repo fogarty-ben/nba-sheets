@@ -3,7 +3,9 @@ NBA Sheets
 A small script to update a Google Sheet w/ NBA standings.
 
 Ben Fogarty
-2 December 2020
+Created: 2 December 2020
+
+Last updated: 13 November 2021
 '''
 
 import json
@@ -20,8 +22,8 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-TY_FS_AST_URL = 'https://www.foxsports.com/nba/trae-young-player-stats?category=assists&seasonType=reg'
-KD_FS_MISC_URL = 'https://www.foxsports.com/nba/kevin-durant-player-stats?category=misc&seasonType=reg'
+RW_USG_URL = 'https://www.foxsports.com/nba/russell-westbrook-player-stats?category=advanced&seasonType=reg'
+ZW_MVP_URL = 'https://www.basketball-reference.com/friv/mvp.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Clippers': 'LA Clippers',
@@ -122,7 +124,10 @@ def get_standings(url):
                       inplace=True)
 
     standings_df = western_df.merge(eastern_df, how='outer', on='RANK')
-    standings_df['PLAYOFF POINTS'] = [8] * 8 + [0] * 7
+
+    # will need to update playoff points after play-in
+    standings_df['PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
+
     cols_ordered = ['RANK', 'PLAYOFF POINTS'] 
     other_cols = standings_df.columns.values.tolist()[1:-1]
     cols_ordered = cols_ordered + other_cols
@@ -136,7 +141,7 @@ def parse_fs_player_pg(url, stat, fxn=str):
     Inputs:
     url (str): web address of the player's profile with the stat
     stat (str): title of the stat to grab
-    fxn (function): function to cast the parsed statto
+    fxn (function): function to cast the parsed stat to
 
     Returns: fxn (by default str)
     '''
@@ -164,6 +169,35 @@ def parse_fs_player_pg(url, stat, fxn=str):
 
     return fxn(cell.text)
 
+def parse_bbref_mvp_tracker(url, player, fxn=str):
+    '''
+    Retrieve a player's current standing in the Basketball Reference MVP
+    standings model.
+
+    Inputs:
+    url (str): web address of the BBRef standings model
+    player (str): name of the player to search for
+    fxn (function): function to cast the parsed ranking to
+
+    Returns: fsn (by default string)
+    '''
+    r = requests.get(url)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.content, 'html.parser')
+    data_table = soup.find('table', id='players')
+    table_body = data_table.find('tbody')
+
+
+    for row in table_body.findAll('tr', ):
+        ranking = row.find('th', {'data-stat': 'ranker'}).text
+        player_col = row.find('td', {'data-stat': 'player'})
+        player_name = player_col.text
+        if player_name.lower() == player.lower():
+            return fxn(ranking)
+
+    return fxn('Unranked')
+
 def get_sheet(service_key, ss_key, ws_title):
     '''
     Obtain the Google Sheets Worksheet to update.
@@ -182,15 +216,15 @@ def get_sheet(service_key, ss_key, ws_title):
 
     return ws
 
-def update_sheet(ws, standings, ty_apg, kd_techs):
+def update_sheet(ws, standings, rw_usg, zw_mvp):
     '''
     Write updates to a Google Sheets worksheet.
 
     Inputs:
     ws (gspread.models.Worksheet): worksheet to update
     standings (pandas dataframe): standings from get_standings call
-    ty_apg (float): Trae Young's APG
-    kd_techs (int): Kevin Durant's technical fouls
+    ty_apg (float): Russell Westbrooks usage rate
+    kd_techs (str): Zions MVP standings
     '''
     # update standings and tie breaks
     if isinstance(standings, pd.DataFrame):
@@ -206,14 +240,14 @@ def update_sheet(ws, standings, ty_apg, kd_techs):
         ws.update_cell(17, 1,
                        f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(kd_techs, int):
-        ws.update_cell(19, 1, 'Kevin Durant Techs:')
-        ws.update_cell(19, 2, kd_techs)
+    if isinstance(rw_usg, float):
+        ws.update_cell(19, 1, 'Russell Westbrook USG%:')
+        ws.update_cell(19, 2, rw_usg)
         ws.update_cell(19, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(ty_apg, float):
-        ws.update_cell(20, 1, 'Trae Young APG:')
-        ws.update_cell(20, 2, ty_apg)
+    if isinstance(zw_mvp, str):
+        ws.update_cell(20, 1, 'Zion Williamson MVP tracker:')
+        ws.update_cell(20, 2, zw_mvp)
         ws.update_cell(20, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
         
     ws.update_cell(21, 1, f'Automatically updated by {REF_LINK}')
@@ -226,25 +260,27 @@ if __name__ == '__main__':
         standings = None
 
     try:
-        ty_apg = parse_fs_player_pg(TY_FS_AST_URL, 'APG', fxn=float)
+        rw_usg = parse_fs_player_pg(RW_USG_URL, 'USG%', fxn=float)
     except Exception as e:
-        print(f'TY APG: {e}')
-        ty_apg = None
+        print(f'Russell Westbrook usage: {e}')
+        rw_usg = None
 
     try:
-        kd_techs = parse_fs_player_pg(KD_FS_MISC_URL, 'TECH', fxn=int)
+        zw_mvp = parse_bbref_mvp_tracker(
+            ZW_MVP_URL, 'Zion Williamson', fxn=str
+        )
     except Exception as e:
-        print(f'KD Techs: {e}')
-        kd_techs = None
+        print(f'ZW MVP: {e}')
+        zw_mvp = None
 
     sheet_id = SHEET_INFO['sheet_id']
     worksheet_name = SHEET_INFO['worksheet_name']
 
     ws = get_sheet(SERVICE_KEY_FP, sheet_id, worksheet_name)
-    update_sheet(ws, standings, ty_apg, kd_techs)
+    update_sheet(ws, standings, rw_usg, zw_mvp)
 
-    assert (isinstance(standings, pd.DataFrame) and isinstance(ty_apg, float)
-            and isinstance(kd_techs, int)),\
+    assert (isinstance(standings, pd.DataFrame) and isinstance(rw_usg, float)
+            and isinstance(zw_mvp, str)),\
            (f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
-            f'TY APG: {isinstance(ty_apg, float)}, ' +
-            f'KD Techs: {isinstance(kd_techs, int)}')
+            f'RW USG: {isinstance(rw_usg, float)}, ' +
+            f'ZW MVP: {isinstance(zw_mvp, str)}')
