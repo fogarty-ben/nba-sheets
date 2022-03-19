@@ -93,7 +93,7 @@ def get_conference_standings(standings_tbl):
 
     df['GB'] = df.GB.where(df.GB != '-', 0)
     df['PCT'] = df.PCT.where(df.PCT != '-', 0)
-    df['TEAM'] = df.TEAM.map(NAMES_MAP)
+    df['TEAM'] = df.TEAM.str.strip().map(NAMES_MAP)
 
     df = df.astype({'GB': float,
                     'PCT': float,
@@ -236,6 +236,7 @@ def update_sheet(ws, standings, rw_usg, zw_mvp):
                 ws.insert_row(standings.columns.values.tolist(), index=1)
                 break
         # update rows
+        standings.to_csv('standings.csv')
         ws.update('A2:J16', standings.values.tolist())
         ws.update_cell(17, 1,
                        f'Last updated: {pd.Timestamp.today().ctime()} UTC')
