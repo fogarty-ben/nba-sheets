@@ -9,6 +9,7 @@ Last updated: 13 November 2021
 '''
 
 import json
+import logging
 
 from bs4 import BeautifulSoup
 import gspread
@@ -22,8 +23,7 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-RW_USG_URL = 'https://www.foxsports.com/nba/russell-westbrook-player-stats?category=advanced&seasonType=reg'
-ZW_MVP_URL = 'https://www.basketball-reference.com/friv/mvp.html'
+LBJ_URL = 'https://www.basketball-reference.com/players/j/jamesle01.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Clippers': 'LA Clippers',
@@ -91,13 +91,19 @@ def get_conference_standings(standings_tbl):
         data.append(entry)
     df = pd.DataFrame(data)
 
+    missing_cols = {'W-L', 'PCT', 'GB'} - set(df.columns)
+    for col in missing_cols:
+        df[col] = 0
+        logging.error(f"Standings: couldn't find {col} column")
+
+
     df['GB'] = df.GB.where(df.GB != '-', 0)
     df['PCT'] = df.PCT.where(df.PCT != '-', 0)
     df['TEAM'] = df.TEAM.str.strip().map(NAMES_MAP)
 
     df = df.astype({'GB': float,
                     'PCT': float,
-                    'RANK': int})
+                    'RANK': float})
 
 
     return df
@@ -108,7 +114,7 @@ def get_standings(url):
 
     url (str): web address of the Fox Sports NBA standings page
 
-    Returns: pandas dataframe
+    Returns: three pandas dataframes
     '''
     r = requests.get(url)
     r.raise_for_status()
@@ -132,15 +138,15 @@ def get_standings(url):
     other_cols = standings_df.columns.values.tolist()[1:-1]
     cols_ordered = cols_ordered + other_cols
 
-    return standings_df[cols_ordered]
+    return standings_df[cols_ordered], eastern_df, western_df
 
-def parse_fs_player_pg(url, stat, fxn=str):
+def parse_bbref_player_pg(url, stat, fxn=str):
     '''
-    Retrieve a stat category from a player's Fox Sports website profile.
+    Retrieve LeBron James' career total points from his Basketball Reference
+    page.
 
     Inputs:
     url (str): web address of the player's profile with the stat
-    stat (str): title of the stat to grab
     fxn (function): function to cast the parsed stat to
 
     Returns: fxn (by default str)
@@ -149,37 +155,32 @@ def parse_fs_player_pg(url, stat, fxn=str):
     r.raise_for_status()
 
     soup = BeautifulSoup(r.content, 'html.parser')
-    data_tables = soup.findAll('table', class_='data-table')
+    data_table = soup.find('table', id='totals')
 
-    # find column
-    i = 0
-    for col in data_tables[0].findAll('th'):
-        colspan = col.get('colspan', 1)
-        i += int(colspan)
-        content = col.text.strip()
-        if content == stat:
-            i -= 1 # correct to 0-based indexing
-            break
+    career_val = (
+        data_table
+        .find('tfoot')
+        .find('tr')
+        .find('td', {'data-stat': 'pts'})
+        .text
+        .strip()
+    )
 
-    # get stat
-    seasons = data_tables[1].findAll('tr')
-    current_season = seasons[-1]
-    row = current_season.findAll('td')
-    cell = row[i]
-
-    return fxn(cell.text)
+    return fxn(career_val)
 
 def parse_bbref_mvp_tracker(url, player, fxn=str):
     '''
     Retrieve a player's current standing in the Basketball Reference MVP
     standings model.
 
+    ** Not in use since 2021-22 season **
+
     Inputs:
     url (str): web address of the BBRef standings model
     player (str): name of the player to search for
     fxn (function): function to cast the parsed ranking to
 
-    Returns: fsn (by default string)
+    Returns: fxn (by default string)
     '''
     r = requests.get(url)
     r.raise_for_status()
@@ -197,6 +198,38 @@ def parse_bbref_mvp_tracker(url, player, fxn=str):
             return fxn(ranking)
 
     return fxn('Unranked')
+
+def get_combined_wins(
+        eastern_standings, western_standings, n_teams, worst=True, fxn=str
+    ):
+    '''
+    Get the total number of wins across the best/worst n_teams in the league by
+    winning pct.
+
+    Inputs:
+    eastern_standings/western_standings (pd.DataFrame): standings dataframes
+        from get_conference_standings(...)
+    n_teams (int): number of teams to sum the wins of
+    worst (bool): if True, sum across the worst teams; if False, sum across the
+        best teams
+    fxn (function): function to cast the parsed ranking to
+
+
+    Returns: fxn (by default str)
+    '''
+    for df in [eastern_standings, western_standings]:
+        df.rename(lambda x: x[5:], axis=1, inplace=True)
+    return fxn(
+        eastern_standings
+        .append(western_standings)
+        .sort_values('PCT', ascending=worst)
+        .head(n_teams)
+        ['W-L']
+        .str.extract(r'^(\d+)')
+        .astype(int)
+        .sum()
+        .squeeze()
+    )
 
 def get_sheet(service_key, ss_key, ws_title):
     '''
@@ -216,15 +249,15 @@ def get_sheet(service_key, ss_key, ws_title):
 
     return ws
 
-def update_sheet(ws, standings, rw_usg, zw_mvp):
+def update_sheet(ws, standings, bot_3_wins, lj_career_points):
     '''
     Write updates to a Google Sheets worksheet.
 
     Inputs:
     ws (gspread.models.Worksheet): worksheet to update
     standings (pandas dataframe): standings from get_standings call
-    ty_apg (float): Russell Westbrooks usage rate
-    kd_techs (str): Zions MVP standings
+    bot_3_wins (str): Bottom three teams combined wins
+    lj_career_points (str): LeBron James career points 
     '''
     # update standings and tie breaks
     if isinstance(standings, pd.DataFrame):
@@ -241,47 +274,47 @@ def update_sheet(ws, standings, rw_usg, zw_mvp):
         ws.update_cell(17, 1,
                        f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(rw_usg, float):
-        ws.update_cell(19, 1, 'Russell Westbrook USG%:')
-        ws.update_cell(19, 2, rw_usg)
+    if isinstance(bot_3_wins, int):
+        ws.update_cell(19, 1, 'Combined wins of bottom three teams:')
+        ws.update_cell(19, 2, bot_3_wins)
         ws.update_cell(19, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(zw_mvp, str):
-        ws.update_cell(20, 1, 'Zion Williamson MVP tracker:')
-        ws.update_cell(20, 2, zw_mvp)
+    if isinstance(lj_career_points, int):
+        ws.update_cell(20, 1, 'LeBron James career points:')
+        ws.update_cell(20, 2, lj_career_points)
         ws.update_cell(20, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
         
     ws.update_cell(21, 1, f'Automatically updated by {REF_LINK}')
 
 if __name__ == '__main__':
     try:
-        standings = get_standings(STANDINGS_FS_URL)
+        standings, eastern_df, western_df = get_standings(STANDINGS_FS_URL)
     except Exception as e:
         print(f'Standings: {e}')
         standings = None
 
     try:
-        rw_usg = parse_fs_player_pg(RW_USG_URL, 'USG%', fxn=float)
+        bot_3_wins = get_combined_wins(
+        eastern_df, western_df, 3, worst=True, fxn=int
+    )
     except Exception as e:
-        print(f'Russell Westbrook usage: {e}')
-        rw_usg = None
+        print(f'Bottom three teams combined wins: {e}')
+        bot_3_wins = None
 
     try:
-        zw_mvp = parse_bbref_mvp_tracker(
-            ZW_MVP_URL, 'Zion Williamson', fxn=str
-        )
+        lj_career_points = parse_bbref_player_pg(LBJ_URL, 'USG%', fxn=int)
     except Exception as e:
-        print(f'ZW MVP: {e}')
-        zw_mvp = None
+        print(f'LeBron James career points: {e}')
+        lj_career_points = None
 
     sheet_id = SHEET_INFO['sheet_id']
     worksheet_name = SHEET_INFO['worksheet_name']
 
     ws = get_sheet(SERVICE_KEY_FP, sheet_id, worksheet_name)
-    update_sheet(ws, standings, rw_usg, zw_mvp)
+    update_sheet(ws, standings, bot_3_wins, lj_career_points)
 
-    assert (isinstance(standings, pd.DataFrame) and isinstance(rw_usg, float)
-            and isinstance(zw_mvp, str)),\
+    assert (isinstance(standings, pd.DataFrame) and isinstance(bot_3_wins, int)
+            and isinstance(lj_career_points, int)),\
            (f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
-            f'RW USG: {isinstance(rw_usg, float)}, ' +
-            f'ZW MVP: {isinstance(zw_mvp, str)}')
+            f'Bottom three teams combined wins: {isinstance(bot_3_wins, int)}, ' +
+            f'LeBron James career points: {isinstance(lj_career_points, int)}')
