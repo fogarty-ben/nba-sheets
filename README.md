@@ -3,8 +3,8 @@
 Parse NBA standings (and a few random stats) from the Fox Sports & BBRef websites and write them to a Google Sheet.
 
 Ben Fogarty  
-Created: 5 December 2020
-Last updated: 13 November 2021
+Created: December 2020  
+Last updated: December 2022
 
 # How it works
 
