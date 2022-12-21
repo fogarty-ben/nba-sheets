@@ -17,7 +17,7 @@ jobs:
   # This workflow contains a single job called "build"
   build:
     # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -50,3 +50,7 @@ jobs:
           WORKSHEET_NAME: ${{ secrets.WORKSHEET_NAME }}
       - name: execute script
         run: python nba_sheets.py
+        
+      # keepalive workflow prevents inactivity-based disables of github actions
+      - name: autocommit
+        uses: gautamkrishnar/keepalive-workflow@v1 
