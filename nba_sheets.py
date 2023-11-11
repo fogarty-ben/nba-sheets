@@ -132,11 +132,15 @@ def get_standings(url):
     standings_df = western_df.merge(eastern_df, how='outer', on='RANK')
 
     # will need to update playoff points after play-in
-    standings_df['PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
+    standings_df['WEST PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
+    standings_df['EAST PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
 
-    cols_ordered = ['RANK', 'PLAYOFF POINTS'] 
-    other_cols = standings_df.columns.values.tolist()[1:-1]
-    cols_ordered = cols_ordered + other_cols
+    cols_ordered = (
+        ['RANK', 'WEST PLAYOFF POINTS'] +
+        list(filter(lambda x: not x == 'RANK', western_df.columns)) +
+        ['EAST PLAYOFF POINTS'] +
+        list(filter(lambda x: not x == 'RANK', eastern_df.columns))
+    )
 
     return standings_df[cols_ordered], eastern_df, western_df
 
@@ -144,6 +148,8 @@ def parse_bbref_player_pg(url, stat, fxn=str):
     '''
     Retrieve LeBron James' career total points from his Basketball Reference
     page.
+
+    ** Not in use since 2022-23 **
 
     Inputs:
     url (str): web address of the player's profile with the stat
@@ -206,6 +212,8 @@ def get_combined_wins(
     Get the total number of wins across the best/worst n_teams in the league by
     winning pct.
 
+    ** Not in use since 2022-23 season **
+
     Inputs:
     eastern_standings/western_standings (pd.DataFrame): standings dataframes
         from get_conference_standings(...)
@@ -249,7 +257,14 @@ def get_sheet(service_key, ss_key, ws_title):
 
     return ws
 
-def update_sheet(ws, standings, bot_3_wins, lj_career_points):
+def update_sheet(
+    ws,
+    standings,
+    tiebreaker_1_text,
+    tiebreaker_1_value,
+    tiebreaker_2_text,
+    tiebreaker_2_value
+):
     '''
     Write updates to a Google Sheets worksheet.
 
@@ -270,18 +285,18 @@ def update_sheet(ws, standings, bot_3_wins, lj_career_points):
                 break
         # update rows
         standings.to_csv('standings.csv')
-        ws.update('A2:J16', standings.values.tolist())
+        ws.update('A2:K16', standings.values.tolist())
         ws.update_cell(17, 1,
                        f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(bot_3_wins, int):
-        ws.update_cell(19, 1, 'Combined wins of bottom three teams:')
-        ws.update_cell(19, 2, bot_3_wins)
+    if isinstance(tiebreaker_1_value, int):
+        ws.update_cell(19, 1, tiebreaker_1_text)
+        ws.update_cell(19, 2, tiebreaker_1_value)
         ws.update_cell(19, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
 
-    if isinstance(lj_career_points, int):
-        ws.update_cell(20, 1, 'LeBron James career points:')
-        ws.update_cell(20, 2, lj_career_points)
+    if isinstance(tiebreaker_2_value, int):
+        ws.update_cell(20, 1, tiebreaker_2_text)
+        ws.update_cell(20, 2, tiebreaker_2_value)
         ws.update_cell(20, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
         
     ws.update_cell(21, 1, f'Automatically updated by {REF_LINK}')
@@ -290,31 +305,41 @@ if __name__ == '__main__':
     try:
         standings, eastern_df, western_df = get_standings(STANDINGS_FS_URL)
     except Exception as e:
-        print(f'Standings: {e}')
+        print(f'Standings error: {e}')
         standings = None
 
     try:
-        bot_3_wins = get_combined_wins(
-        eastern_df, western_df, 3, worst=True, fxn=int
-    )
+        tiebreaker_1_text = "In-season tournament championship game viewers"
+        tiebreaker_1_value =  -1
     except Exception as e:
-        print(f'Bottom three teams combined wins: {e}')
-        bot_3_wins = None
+        print(f'Tiebreaker 1 error: {e}')
+        tiebreaker_1_value = None
 
     try:
-        lj_career_points = parse_bbref_player_pg(LBJ_URL, 'USG%', fxn=int)
+        tiebreaker_2_text = "76ers games before Harden is traded"
+        tiebreaker_2_value = 3
     except Exception as e:
-        print(f'LeBron James career points: {e}')
-        lj_career_points = None
+        print(f'Tiebreaker 2 error: {e}')
+        tiebreaker_2_value = None
 
     sheet_id = SHEET_INFO['sheet_id']
     worksheet_name = SHEET_INFO['worksheet_name']
 
     ws = get_sheet(SERVICE_KEY_FP, sheet_id, worksheet_name)
-    update_sheet(ws, standings, bot_3_wins, lj_career_points)
-
-    assert (isinstance(standings, pd.DataFrame) and isinstance(bot_3_wins, int)
-            and isinstance(lj_career_points, int)),\
-           (f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
-            f'Bottom three teams combined wins: {isinstance(bot_3_wins, int)}, ' +
-            f'LeBron James career points: {isinstance(lj_career_points, int)}')
+    update_sheet(
+        ws,
+        standings,
+        tiebreaker_1_text,
+        tiebreaker_1_value,
+        tiebreaker_2_text,
+        tiebreaker_2_value
+    )
+    assert (
+            isinstance(standings, pd.DataFrame) and
+            isinstance(tiebreaker_1_value, int) and
+            isinstance(tiebreaker_2_value, int)
+        ), (
+            f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
+            f'Tiebraker 1: {isinstance(tiebreaker_1_value, int)}, ' +
+            f'Tiebreaker 2: {isinstance(tiebreaker_2_value, int)}'
+        )
