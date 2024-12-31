@@ -47,7 +47,7 @@ jobs:
           GKEY_TOKEN_URI: ${{ secrets.GKEY_TOKEN_URI }}
           GKEY_TYPE: ${{ secrets.GKEY_TYPE }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          WORKSHEET_NAME: ${{ secrets.WORKSHEET_NAME }}
+          RESPONSE_WS_NAME: ${{ secrets.RESPONSE_WS_NAME }}
       - name: execute script
         run: python nba_sheets.py
         
