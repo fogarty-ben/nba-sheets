@@ -10,10 +10,12 @@ Last updated: 13 November 2021
 
 import json
 import logging
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 import gspread
 import pandas as pd
+import pytz
 import requests
 
 SERVICE_KEY_FP = 'service_key.json'
@@ -23,7 +25,8 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-LBJ_URL = 'https://www.basketball-reference.com/players/j/jamesle01.html'
+BRONNY_URL = 'https://www.basketball-reference.com/players/j/jamesbr02.html'
+WEMBANYAMA_URL = 'https://www.basketball-reference.com/players/w/wembavi01.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Clippers': 'LA Clippers',
@@ -54,7 +57,34 @@ NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Knicks': 'New York Knicks',
              'Pistons': 'Detroit Pistons',
              'Hawks': 'Atlanta Hawks',
-             'Cavaliers': 'Cleveland Cavaliers'}
+             'Cavaliers': 'Cleveland Cavaliers'
+            }
+
+COLS_MAP = {
+    'Timestamp': 'timestamp',
+    'Email Address': 'Email',
+    'What is your name (government or d.b.a.)?': 'Name',
+    'Who will end up with the 1 seed in the Western Conference?': 'Western_1',
+    'Who will end up with the 2 seed in the Western Conference?': 'Western_2',
+    'Who will end up with the 3 seed in the Western Conference?': 'Western_3',
+    'Who will end up with the 4 seed in the Western Conference?': 'Western_4',
+    'Who will end up with the 5 seed in the Western Conference?': 'Western_5',
+    'Who will end up with the 6 seed in the Western Conference?': 'Western_6',
+    'Who will end up with the 7 seed in the Western Conference?': 'Western_7',
+    'Who will end up with the 8 seed in the Western Conference?': 'Western_8',
+    'Who will end up with the 1 seed in the Eastern Conference?': 'Eastern_1',
+    'Who will end up with the 2 seed in the Eastern Conference?': 'Eastern_2',
+    'Who will end up with the 3 seed in the Eastern Conference?': 'Eastern_3',
+    'Who will end up with the 4 seed in the Eastern Conference?': 'Eastern_4',
+    'Who will end up with the 5 seed in the Eastern Conference?': 'Eastern_5',
+    'Who will end up with the 6 seed in the Eastern Conference?': 'Eastern_6',
+    'Who will end up with the 7 seed in the Eastern Conference?': 'Eastern_7',
+    'Who will end up with the 8 seed in the Eastern Conference?': 'Eastern_8',
+    'Daddy can only get you so far: How many regular season NBA games will Bronny James play in?': 'Tiebreaker_1',
+    'Wembanyama? More like Wemban-NO-ma: How many total blocks will Victor Wembanyama make during the regular season?': 'Tiebreaker_2',
+    'Did you do it yet?': 'paid',
+    'Are picks valid?': 'are_picks_valid'
+}
 
 def get_conference_standings(standings_tbl):
     '''
@@ -68,8 +98,8 @@ def get_conference_standings(standings_tbl):
     # find column locations
     i = 0
     cols = {'W-L', 'PCT', 'GB'}
-    col_locs = {'RANK': 0,
-                'TEAM': 1}
+    col_locs = {'Rank': 0,
+                'Team': 1}
     for col in standings_tbl.findAll('th'):
         colspan = col.get('colspan', 1)
         i += int(colspan)
@@ -99,11 +129,11 @@ def get_conference_standings(standings_tbl):
 
     df['GB'] = df.GB.where(df.GB != '-', 0)
     df['PCT'] = df.PCT.where(df.PCT != '-', 0)
-    df['TEAM'] = df.TEAM.str.strip().map(NAMES_MAP)
+    df['Team'] = df.Team.str.strip().map(NAMES_MAP)
 
     df = df.astype({'GB': float,
                     'PCT': float,
-                    'RANK': float})
+                    'Rank': int})
 
 
     return df
@@ -114,7 +144,7 @@ def get_standings(url):
 
     url (str): web address of the Fox Sports NBA standings page
 
-    Returns: three pandas dataframes
+    Returns: two pandas dataframes
     '''
     r = requests.get(url)
     r.raise_for_status()
@@ -123,36 +153,30 @@ def get_standings(url):
     eastern_html, western_html = soup.findAll('table', class_='data-table')
 
     eastern_df = get_conference_standings(eastern_html)
-    eastern_df.rename(lambda x: ('EAST ' + x) if not x == 'RANK' else x, axis=1,
-                      inplace=True)
     western_df = get_conference_standings(western_html)
-    western_df.rename(lambda x: ('WEST ' + x) if not x == 'RANK' else x, axis=1,
-                      inplace=True)
-
-    standings_df = western_df.merge(eastern_df, how='outer', on='RANK')
 
     # will need to update playoff points after play-in
-    standings_df['WEST PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
-    standings_df['EAST PLAYOFF POINTS'] = [8] * 6 + [4] * 2 + [0] * 7
+    western_df['Playoff Points'] = [8] * 6 + [4] * 2 + [0] * 7
+    eastern_df['Playoff Points'] = [8] * 6 + [4] * 2 + [0] * 7
 
-    cols_ordered = (
-        ['RANK', 'WEST PLAYOFF POINTS'] +
-        list(filter(lambda x: not x == 'RANK', western_df.columns)) +
-        ['EAST PLAYOFF POINTS'] +
-        list(filter(lambda x: not x == 'RANK', eastern_df.columns))
-    )
+    western_df['Conference'] = "Western"
+    eastern_df['Conference'] = "Eastern"
 
-    return standings_df[cols_ordered], eastern_df, western_df
+    standings_df = pd.concat([western_df, eastern_df], axis=0)
+    standings_df = standings_df[['Conference', 'Rank', 'Team', 'W-L', 'PCT', 'GB', 'Playoff Points']]
 
-def parse_bbref_player_pg(url, stat, fxn=str):
+    return standings_df
+
+def parse_bbref_player_pg(url, row_id, stat_id, fxn=str):
     '''
-    Retrieve LeBron James' career total points from his Basketball Reference
-    page.
+    Retrieve season totals from player Basketball Reference pages.
 
     ** Not in use since 2022-23 **
 
     Inputs:
     url (str): web address of the player's profile with the stat
+    row_id (str): id of the row to pull data from
+    stat_id (str): data-stat attribute to pull
     fxn (function): function to cast the parsed stat to
 
     Returns: fxn (by default str)
@@ -161,18 +185,18 @@ def parse_bbref_player_pg(url, stat, fxn=str):
     r.raise_for_status()
 
     soup = BeautifulSoup(r.content, 'html.parser')
-    data_table = soup.find('table', id='totals')
+    data_table = soup.find('table', id='totals_stats')
 
-    career_val = (
+    season_val = (
         data_table
-        .find('tfoot')
-        .find('tr')
-        .find('td', {'data-stat': 'pts'})
+        .find('tbody')
+        .find('tr', id=row_id)
+        .find('td', {'data-stat': stat_id})
         .text
         .strip()
     )
 
-    return fxn(career_val)
+    return fxn(season_val)
 
 def parse_bbref_mvp_tracker(url, player, fxn=str):
     '''
@@ -239,107 +263,336 @@ def get_combined_wins(
         .squeeze()
     )
 
-def get_sheet(service_key, ss_key, ws_title):
+def parse_picks_ws(ws):
     '''
-    Obtain the Google Sheets Worksheet to update.
+    Read each participant's picks from a Google Sheets worksheet.
 
     Inputs:
-    service_key (str): path to service account json key
-    ss_key (str): key/id of the google sheet to update, must be shared with the
-        service account being used
-    ws_title (str): title of the worksheet to update
+    ws (gspread.models.Worksheet): worksheet containing picks
 
-    Returns: gspread.models.Worksheet
+    Returns: tuple of pd.DataFrame (picks) and pd.DataFrame (tiebreakers)
     '''
-    gc = gspread.service_account(service_key)
-    ss = gc.open_by_key(ss_key)
-    ws = ss.worksheet(ws_title)
+    df = pd.DataFrame.from_records(ws.get_all_records())
+    df = df.rename(COLS_MAP, axis=1)
 
-    return ws
+    is_picks_col = lambda x: (
+        x in {'Email', 'Name'} or x.startswith('Western_') or x.startswith('Eastern_')
+    )
+    picks_col_mask = list(map(is_picks_col, df.columns))
+    picks_df = df.loc[:, picks_col_mask]
 
-def update_sheet(
-    ws,
-    standings,
-    tiebreaker_1_text,
-    tiebreaker_1_value,
-    tiebreaker_2_text,
-    tiebreaker_2_value
-):
-    '''
-    Write updates to a Google Sheets worksheet.
+    picks_df = picks_df.melt(
+        id_vars=['Email', 'Name'], var_name='Pick', value_name='Team'
+    )
+    picks_df[['Conference', 'Picks Rank']] = (
+        picks_df['Pick'].str.split('_', n=1, expand=True)
+    )
+    picks_df = picks_df.astype({'Picks Rank': int})
+    picks_df = picks_df.drop('Pick', axis=1)
+
+    is_tiebreakers_col = lambda x: (
+        x in {'Email', 'Name'} or x.startswith('Tiebreaker_')
+    )
+    tiebreakers_mask = list(map(is_tiebreakers_col, df.columns))
+    tiebreakers_df = df.loc[:, tiebreakers_mask]
+
+    tiebreakers_df = tiebreakers_df.melt(
+        id_vars=['Email', 'Name'], var_name='Pick', value_name='Pick Value'
+    )
+
+    tiebreakers_df[['Tiebreaker #']] = (
+        tiebreakers_df['Pick'].str.split('_', n=1, expand=True).iloc[:, [1]]
+    )
+    tiebreakers_df = tiebreakers_df.drop('Pick', axis=1)
+
+    return picks_df, tiebreakers_df
+
+def get_existing_ws_names(wb):
+    """
+    List the names of existing worksheets in a workbook.
 
     Inputs:
-    ws (gspread.models.Worksheet): worksheet to update
-    standings (pandas dataframe): standings from get_standings call
-    bot_3_wins (str): Bottom three teams combined wins
-    lj_career_points (str): LeBron James career points 
-    '''
-    # update standings and tie breaks
-    if isinstance(standings, pd.DataFrame):
-        # add headers if necessary
-        for i, col in enumerate(standings.columns):
-            cell = ws.acell(f'A{i + 1}')
-            if not cell.value == col:
-                ws.delete_rows(1)
-                ws.insert_row(standings.columns.values.tolist(), index=1)
-                break
-        # update rows
-        standings.to_csv('standings.csv')
-        ws.update('A2:K16', standings.values.tolist())
-        ws.update_cell(17, 1,
-                       f'Last updated: {pd.Timestamp.today().ctime()} UTC')
+    wb (gspread.models.Spreadsheet): workbook
 
-    if isinstance(tiebreaker_1_value, int):
-        ws.update_cell(19, 1, tiebreaker_1_text)
-        ws.update_cell(19, 2, tiebreaker_1_value)
-        ws.update_cell(19, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
+    Returns: set
+    """
+    return set(map(lambda x: x.title, wb.worksheets()))
 
-    if isinstance(tiebreaker_2_value, int):
-        ws.update_cell(20, 1, tiebreaker_2_text)
-        ws.update_cell(20, 2, tiebreaker_2_value)
-        ws.update_cell(20, 3, f'Last updated: {pd.Timestamp.today().ctime()} UTC')
+def write_standings(wb, ws_name, standings_df):
+    """
+    Write NBA standings to the Google Sheet.
+
+    Inputs:
+    wb (spread.models.Spreadsheet): Google Sheet to update
+    ws_name (str): name of the sheet to write in
+    standings_df (pd.DataFrame): standings
+    """
+    if not ws_name in get_existing_ws_names(wb):
+        wb.add_worksheet(title=ws_name, rows=16, cols=6)
         
-    ws.update_cell(21, 1, f'Automatically updated by {REF_LINK}')
+    ws = wb.worksheet(ws_name)
+
+    col_names = [standings_df.columns.values.tolist()]
+    values = standings_df.values.tolist()
+    data = col_names + values
+    ws.update(data)
+
+def write_tiebreakers(
+    wb, ws_name, tb_1_text, tb_1_value, tb_2_text, tb_2_value
+):
+    """
+    Write tiebreakers to the Google Sheet.
+
+    Inputs:
+    wb (spread.models.Spreadsheet): Google Sheet to update
+    ws_name (str): name of the sheet to write to
+    tb_1_text (str): text description of the first tiebreaker
+    tb_1_value (numeric): value of the first tiebreaker
+    tb_2_text (str): text description of the second tiebreaker
+    tb_2_value (numeric): value of the second tiebreaker
+    """
+    if not ws_name in get_existing_ws_names(wb):
+        wb.add_worksheet(ws_name, rows=3, cols=3)
+    
+    ws = wb.worksheet(ws_name)
+
+    data = [
+        ['Tiebreaker #', 'Tiebreaker Description', 'Tiebreaker Value'],
+        [1, tb_1_text, tb_1_value],
+        [2, tb_2_text, tb_2_value]
+    ]
+    ws.update(data)
+
+def write_standings_picks(
+    wb, standings_picks_ws_name, standings_picks_df, standings_ws_name
+):
+    """
+    Write standings picks to the Google Sheet.
+
+    Inputs:
+    wb (spread.models.Spreadsheet): Google Sheet to update
+    ws_name (str): name of the sheet to write to
+    standings_picks_df (pd.DataFrame): standings picks data
+    standings_ws_name (str): name of the sheet containing NBA standigns
+    """
+    n_rows, n_cols = standings_picks_df.shape
+    if not standings_picks_ws_name in get_existing_ws_names(wb):
+        wb.add_worksheet(title=standings_picks_ws_name, rows=n_rows + 1, cols=n_cols + 4)
+        
+    ws = wb.worksheet(standings_picks_ws_name)
+
+    write_df = standings_picks_df.copy(deep=True)
+
+    team_col_id = write_df.columns.get_loc('Team') + 1
+    write_df['Standings Rank'] = [
+        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$16, {standings_ws_name}!B$2:B$16)"
+        for row_id in range(2, n_rows + 2)
+    ]
+
+    picks_rank_col_id = write_df.columns.get_loc('Picks Rank') + 1
+    standings_rank_col_id = write_df.columns.get_loc('Standings Rank') + 1
+    write_df["Rank Points"] = [
+        f"=SWITCH(ABS({gspread.utils.rowcol_to_a1(row_id, picks_rank_col_id)} - {gspread.utils.rowcol_to_a1(row_id, standings_rank_col_id)}), 0, 7, 1, 5, 2, 3, 3, 1, 0)"
+        for row_id in range(2, n_rows + 2)
+    ]
+
+    write_df['Playoff Points'] = [
+        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$16, {standings_ws_name}!G$2:G$16)"
+        for row_id in range(2, n_rows + 2)
+    ]
+
+    rank_pts_col_id = write_df.columns.get_loc('Rank Points') + 1
+    playoff_pts_col_id = write_df.columns.get_loc('Playoff Points') + 1
+    write_df["Total Points"] = [
+        f"={gspread.utils.rowcol_to_a1(row_id, rank_pts_col_id)} + {gspread.utils.rowcol_to_a1(row_id, playoff_pts_col_id)}"
+        for row_id in range(2, n_rows + 2)
+    ]    
+
+    col_names = [write_df.columns.values.tolist()]
+    values = write_df.values.tolist()
+    data = col_names + values
+    ws.update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
+
+def write_tiebreakers_picks(
+    wb, tiebreaker_picks_ws_name, tiebreaker_picks_df, tiebreakers_ws_name
+):
+    """
+    Write tiebreakers picks to the Google Sheet.
+
+    Inputs:
+    wb (spread.models.Spreadsheet): Google Sheet to update
+    ws_name (str): name of the sheet to write to
+    standings_picks_df (pd.DataFrame): tiebreakers picks data
+    standings_ws_name (str): name of the sheet containing tiebreaker values
+    """
+    n_rows, n_cols = tiebreaker_picks_df.shape
+    if not tiebreaker_picks_ws_name in get_existing_ws_names(wb):
+        wb.add_worksheet(title=tiebreaker_picks_ws_name, rows=n_rows + 1, cols=n_cols + 2)
+        
+    ws = wb.worksheet(tiebreaker_picks_ws_name)
+
+    write_df = tiebreaker_picks_df.copy(deep=True)
+
+    tiebreaker_no_col_id = write_df.columns.get_loc('Tiebreaker #') + 1
+    write_df["Actual Value"] = [
+        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, tiebreaker_no_col_id)}, {tiebreakers_ws_name}!A$2:A$3, {tiebreakers_ws_name}!C$2:C$3)"
+        for row_id in range(2, n_rows + 2)
+    ]
+
+    pick_value_col_id = write_df.columns.get_loc('Pick Value') + 1
+    actual_value_col_id = write_df.columns.get_loc('Actual Value') + 1
+    write_df['Difference'] = [
+        f"=ABS({gspread.utils.rowcol_to_a1(row_id, pick_value_col_id)} - {gspread.utils.rowcol_to_a1(row_id, actual_value_col_id)})"
+        for row_id in range(2, n_rows + 2)
+    ]
+
+    col_names = [write_df.columns.values.tolist()]
+    values = write_df.values.tolist()
+    data = col_names + values
+    ws.update(data, value_input_option=gspread.utils.ValueInputOption.user_entered)
+
+def write_update_timestamps(wb, ws_name, update_timestamps):
+    """
+    Write the timestamp for when each sheet was last updated.
+
+    Inputs:
+    wb (spread.models.Spreadsheet): Google Sheet to update
+    ws_name (str): name of the sheet to write to
+    update_timestamps (dict): key-value pairs for when each sheet was updated
+    """
+    is_first_write = False
+    if not ws_name in get_existing_ws_names(wb):
+        wb.add_worksheet(title=ws_name, rows=len(update_timestamps), cols=2)
+        is_first_write = True
+        
+    ws = wb.worksheet(ws_name)
+
+    data = []
+    if is_first_write:
+        for desc, timestamp in update_timestamps.items():
+            timestamp_str = 'Never'
+            if timestamp:
+                timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')
+            data.append([desc, timestamp_str])
+    else:
+        descs = ws.col_values(1)
+        for i, desc in enumerate(descs):
+            if desc in update_timestamps:
+                timestamp = update_timestamps[desc]
+                timestamp_str = ''
+                if timestamp:
+                    timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')
+                data.append([desc, timestamp_str])
+            else:
+                data.append([desc, ws.get(f"B{i}")])
+                print(f'Update timestamp unexpected desc: {desc}')
+
+    ws.update(data)
 
 if __name__ == '__main__':
     try:
-        standings, eastern_df, western_df = get_standings(STANDINGS_FS_URL)
+        sheet_id = SHEET_INFO['sheet_id']
+        wb = gspread.service_account(SERVICE_KEY_FP).open_by_key(sheet_id)
+    except Exception as e:
+        print(f'Workbook connection error: {e}')
+        raise e
+
+    update_timestamps = {}
+
+    try:
+        standings_df = get_standings(STANDINGS_FS_URL)
+        write_standings(
+            wb,
+            'Standings',
+            standings_df
+        )
+        update_timestamps['Standings'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Standings error: {e}')
         standings = None
+        update_timestamps['Standings'] = None
 
     try:
-        tiebreaker_1_text = "In-season tournament championship game viewers"
-        tiebreaker_1_value =  -1
+        tiebreaker_1_text = "Bronny James games played"
+        tiebreaker_1_value =  parse_bbref_player_pg(
+            BRONNY_URL, 'totals_stats.2025', 'games', int
+        )
+        update_timestamps['Tiebreaker #1'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 1 error: {e}')
         tiebreaker_1_value = None
+        update_timestamps['Tiebreaker #1'] = None
 
     try:
-        tiebreaker_2_text = "76ers games before Harden is traded"
-        tiebreaker_2_value = 3
+        tiebreaker_2_text = "Wembanyama total blocks"
+        tiebreaker_2_value = parse_bbref_player_pg(
+            WEMBANYAMA_URL, 'totals_stats.2025', 'blk', int
+        )
+        update_timestamps['Tiebreaker #2'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 2 error: {e}')
         tiebreaker_2_value = None
+        update_timestamps['Tiebreaker #2'] = None
 
-    sheet_id = SHEET_INFO['sheet_id']
-    worksheet_name = SHEET_INFO['worksheet_name']
+    try:
+        write_tiebreakers(
+            wb,
+            'Tiebreakers',
+            tiebreaker_1_text,
+            tiebreaker_1_value,
+            tiebreaker_2_text,
+            tiebreaker_2_value
+        )
+    except Exception as e:
+        print(f'Tiebreaker write error: {e}')
+        update_timestamps['Tiebreaker #1'] = None
+        update_timestamps['Tiebreaker #2'] = None
 
-    ws = get_sheet(SERVICE_KEY_FP, sheet_id, worksheet_name)
-    update_sheet(
-        ws,
-        standings,
-        tiebreaker_1_text,
-        tiebreaker_1_value,
-        tiebreaker_2_text,
-        tiebreaker_2_value
-    )
+    try:
+        responses_ws_name = SHEET_INFO['responses_ws_name']
+        ws = wb.worksheet(responses_ws_name)
+        standings_picks_df, tiebreaker_picks_df = parse_picks_ws(ws)
+    except Exception as e:
+        print(f'Response parsing error: {e}')
+        picks_df, tiebreaks_df = None, None
+
+    try:
+        write_standings_picks(
+            wb, 'Standings Picks', standings_picks_df, 'Standings'
+        )
+        update_timestamps['Standings Picks'] = datetime.now(tz=pytz.utc)
+    except Exception as e:
+        print(f'Standings picks write error: {e}')
+        update_timestamps['Standings Picks'] = None
+
+    try:
+        write_tiebreakers_picks(
+            wb, 'Tiebreaker Picks', tiebreaker_picks_df, 'Tiebreakers'
+        )
+        update_timestamps['Tiebreaker Picks'] = datetime.now(tz=pytz.utc)
+    except Exception as e:
+        print(f'Tiebreaker picks write error: {e}')
+        update_timestamps['Tiebreaker Picks'] = None
+
+    try:
+        write_update_timestamps(wb, 'Last Updated', update_timestamps)
+        update_timestamps_written = True
+    except Exception as e:
+        print(f'Update timestamps write error: {e}')
+        update_timestamps_written = False
+
     assert (
-            isinstance(standings, pd.DataFrame) and
-            isinstance(tiebreaker_1_value, int) and
-            isinstance(tiebreaker_2_value, int)
+            update_timestamps['Standings'] is not None and
+            update_timestamps['Tiebreaker #1'] is not None and
+            update_timestamps['Tiebreaker #2'] is not None and
+            update_timestamps['Standings Picks'] is not None and
+            update_timestamps['Tiebreaker Picks'] is not None and
+            update_timestamps_written
         ), (
-            f'Standings: {isinstance(standings, pd.DataFrame)}, ' +
-            f'Tiebraker 1: {isinstance(tiebreaker_1_value, int)}, ' +
-            f'Tiebreaker 2: {isinstance(tiebreaker_2_value, int)}'
+            f"Standings: {update_timestamps['Standings'] is not None}, " +
+            f"Tiebraker 1: {update_timestamps['Tiebreaker #1'] is not None}, " +
+            f"Tiebreaker 2: {update_timestamps['Tiebreaker #2'] is not None}, " +
+            f"Standings Picks: {update_timestamps['Standings Picks'] is not None}, " +
+            f"Tiebreaker Picks: {update_timestamps['Tiebreaker Picks'] is not None}, " +
+            f"Update Timestamps: {update_timestamps_written}"
         )

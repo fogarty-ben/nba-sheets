@@ -131,3 +131,7 @@ dmypy.json
 # secrets
 service_key.json
 sheet_info.json
+
+# other
+nbaheader2.jpeg
+standings.csv
