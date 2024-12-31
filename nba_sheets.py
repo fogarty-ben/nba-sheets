@@ -385,7 +385,7 @@ def write_standings_picks(
 
     team_col_id = write_df.columns.get_loc('Team') + 1
     write_df['Standings Rank'] = [
-        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$16, {standings_ws_name}!B$2:B$16)"
+        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$31, {standings_ws_name}!B$2:B$31)"
         for row_id in range(2, n_rows + 2)
     ]
 
@@ -397,7 +397,7 @@ def write_standings_picks(
     ]
 
     write_df['Playoff Points'] = [
-        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$16, {standings_ws_name}!G$2:G$16)"
+        f"=XLOOKUP({gspread.utils.rowcol_to_a1(row_id, team_col_id)}, {standings_ws_name}!C$2:C$31, {standings_ws_name}!G$2:G$31)"
         for row_id in range(2, n_rows + 2)
     ]
 
