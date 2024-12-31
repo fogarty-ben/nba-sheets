@@ -16,7 +16,7 @@ service_key_dict = {
 
 spreadsheet_dict = {
                     'sheet_id': os.environ['SHEET_ID'],
-                    'worksheet_name': os.environ['WORKSHEET_NAME']
+                    'responses_ws_name': os.environ['RESPONSE_WORKSHEET_NAME']
                    }
 
 with open('service_key.json', 'w') as f:
