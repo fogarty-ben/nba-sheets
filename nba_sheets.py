@@ -319,6 +319,10 @@ def summarize_standings_picks(standings_df, standings_picks_df):
 
     Returns: pd.DataFrame
     """
+    standings_picks_df = standings_picks_df.loc[
+        standings_picks_df['Picks Source'] == "Bettor", :
+    ]
+
     standings_df = standings_df.loc[:, ['Conference', 'Team']].drop_duplicates()
     standings_df['__key__'] = 1
     bettors_df = standings_picks_df.loc[:, ['Email']].drop_duplicates()
