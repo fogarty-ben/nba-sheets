@@ -83,7 +83,8 @@ COLS_MAP = {
     'Daddy can only get you so far: How many regular season NBA games will Bronny James play in?': 'Tiebreaker_1',
     'Wembanyama? More like Wemban-NO-ma: How many total blocks will Victor Wembanyama make during the regular season?': 'Tiebreaker_2',
     'Did you do it yet?': 'paid',
-    'Are picks valid?': 'are_picks_valid'
+    'Are picks valid?': 'are_picks_valid',
+    "Bettor or media?": "Picks Source"
 }
 
 def get_conference_standings(standings_tbl):
@@ -276,13 +277,13 @@ def parse_picks_ws(ws):
     df = df.rename(COLS_MAP, axis=1)
 
     is_picks_col = lambda x: (
-        x in {'Email', 'Name'} or x.startswith('Western_') or x.startswith('Eastern_')
+        x in {'Email', 'Name', 'Picks Source'} or x.startswith('Western_') or x.startswith('Eastern_')
     )
     picks_col_mask = list(map(is_picks_col, df.columns))
     picks_df = df.loc[:, picks_col_mask]
 
     picks_df = picks_df.melt(
-        id_vars=['Email', 'Name'], var_name='Pick', value_name='Team'
+        id_vars=['Email', 'Name', 'Picks Source'], var_name='Pick', value_name='Team'
     )
     picks_df[['Conference', 'Picks Rank']] = (
         picks_df['Pick'].str.split('_', n=1, expand=True)
@@ -291,13 +292,13 @@ def parse_picks_ws(ws):
     picks_df = picks_df.drop('Pick', axis=1)
 
     is_tiebreakers_col = lambda x: (
-        x in {'Email', 'Name'} or x.startswith('Tiebreaker_')
+        x in {'Email', 'Name', 'Picks Source'} or x.startswith('Tiebreaker_')
     )
     tiebreakers_mask = list(map(is_tiebreakers_col, df.columns))
     tiebreakers_df = df.loc[:, tiebreakers_mask]
 
     tiebreakers_df = tiebreakers_df.melt(
-        id_vars=['Email', 'Name'], var_name='Pick', value_name='Pick Value'
+        id_vars=['Email', 'Name', 'Picks Source'], var_name='Pick', value_name='Pick Value'
     )
 
     tiebreakers_df[['Tiebreaker #']] = (
@@ -306,6 +307,62 @@ def parse_picks_ws(ws):
     tiebreakers_df = tiebreakers_df.drop('Pick', axis=1)
 
     return picks_df, tiebreakers_df
+
+def summarize_standings_picks(standings_df, standings_picks_df):
+    """
+    Summarize the highest, lowest, most common, and percent ranked of picks by
+    team.
+
+    Inputs:
+    standings_df (pd.DataFrame): standings
+    standings_picks_df (pd.DataFrame): standings picks
+
+    Returns: pd.DataFrame
+    """
+    standings_df = standings_df.loc[:, ['Conference', 'Team']].drop_duplicates()
+    standings_df['__key__'] = 1
+    bettors_df = standings_picks_df.loc[:, ['Email']].drop_duplicates()
+    bettors_df['__key__'] = 1
+
+    scaffold_df = (
+        standings_df
+        .merge(bettors_df, on='__key__', how='inner')
+        .drop('__key__', axis=1)
+        .merge(
+            standings_picks_df, on=['Conference', 'Team', 'Email'], how='left'
+        )
+        .loc[:, ['Conference', 'Team', 'Picks Rank']]
+    )
+    scaffold_df['Picks Rank'] = scaffold_df['Picks Rank'].fillna(9)
+
+    summary_df = (
+        scaffold_df
+        .groupby(['Conference', 'Team'])
+        ['Picks Rank']
+        .agg([
+            'min',
+            'max',
+            'median',
+            lambda x: pd.Series.mode(x).min(),
+            lambda x: (x != 9).sum() / x.count()]
+        )
+        .reset_index()
+    )
+    summary_df.columns = [
+        'Conference',
+        'Team',
+        'Highest Rank',
+        'Lowest Rank',
+        'Median Rank',
+        'Most Common Rank',
+        '# Ranked'
+    ]
+
+    for col in ["Highest Rank", "Lowest Rank", "Median Rank", "Most Common Rank"]:
+        not_ranked_mask = summary_df[col] > 8
+        summary_df[col] = summary_df[col].mask(not_ranked_mask, '')
+
+    return summary_df
 
 def get_existing_ws_names(wb):
     """
@@ -318,22 +375,24 @@ def get_existing_ws_names(wb):
     """
     return set(map(lambda x: x.title, wb.worksheets()))
 
-def write_standings(wb, ws_name, standings_df):
+def write_generic(wb, ws_name, df):
     """
-    Write NBA standings to the Google Sheet.
+    Write a dataframe to a Google Sheet without modifications.
 
     Inputs:
     wb (spread.models.Spreadsheet): Google Sheet to update
     ws_name (str): name of the sheet to write in
-    standings_df (pd.DataFrame): standings
+    df (pd.DataFrame): data to write
     """
+    n_rows, n_cols = df.shape
+    n_rows += 1 # adjust for header
     if not ws_name in get_existing_ws_names(wb):
-        wb.add_worksheet(title=ws_name, rows=16, cols=6)
+        wb.add_worksheet(title=ws_name, rows=n_rows, cols=n_cols)
         
     ws = wb.worksheet(ws_name)
 
-    col_names = [standings_df.columns.values.tolist()]
-    values = standings_df.values.tolist()
+    col_names = [df.columns.values.tolist()]
+    values = df.values.tolist()
     data = col_names + values
     ws.update(data)
 
@@ -501,10 +560,10 @@ if __name__ == '__main__':
 
     try:
         standings_df = get_standings(STANDINGS_FS_URL)
-        write_standings(
+        write_generic(
             wb,
             'Standings',
-            standings_df
+            standings_df,
         )
         update_timestamps['Standings'] = datetime.now(tz=pytz.utc)
     except Exception as e:
@@ -575,6 +634,18 @@ if __name__ == '__main__':
         update_timestamps['Tiebreaker Picks'] = None
 
     try:
+        standings_picks_summary_df = summarize_standings_picks(
+            standings_df, standings_picks_df
+        )
+        write_generic(
+            wb, "Standings Picks Summary", standings_picks_summary_df
+        )
+        update_timestamps['Standings Picks Summary'] = datetime.now(tz=pytz.utc)
+    except Exception as e:
+        print(f'Standing Picks Summary error: {e}')
+        update_timestamps['Standings Picks Summary'] = None
+
+    try:
         write_update_timestamps(wb, 'Last Updated', update_timestamps)
         update_timestamps_written = True
     except Exception as e:
@@ -587,6 +658,7 @@ if __name__ == '__main__':
             update_timestamps['Tiebreaker #2'] is not None and
             update_timestamps['Standings Picks'] is not None and
             update_timestamps['Tiebreaker Picks'] is not None and
+            update_timestamps['Standings Picks Summary'] is not None and
             update_timestamps_written
         ), (
             f"Standings: {update_timestamps['Standings'] is not None}, " +
@@ -594,5 +666,6 @@ if __name__ == '__main__':
             f"Tiebreaker 2: {update_timestamps['Tiebreaker #2'] is not None}, " +
             f"Standings Picks: {update_timestamps['Standings Picks'] is not None}, " +
             f"Tiebreaker Picks: {update_timestamps['Tiebreaker Picks'] is not None}, " +
+            f"Standing Picks Summary: {update_timestamps['Standings Picks Summary'] is not None}, " +
             f"Update Timestamps: {update_timestamps_written}"
         )
