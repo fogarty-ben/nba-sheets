@@ -28,7 +28,7 @@ jobs:
       - name: install python
         uses: actions/setup-python@v6
         with:
-          python-version: 3.9.6
+          python-version: 3.9.25
       - name: install dependencies
         run: |
           python -m pip install --upgrade pip
