@@ -25,8 +25,9 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-BRONNY_URL = 'https://www.basketball-reference.com/players/j/jamesbr02.html'
-WEMBANYAMA_URL = 'https://www.basketball-reference.com/players/w/wembavi01.html'
+STEPH_CURRY_GAME_LOG_URL = 'https://www.basketball-reference.com/players/c/curryst01/gamelog/2026'
+SETH_CURRY_GAME_LOG_URL = 'https://www.basketball-reference.com/players/c/curryse01/gamelog/2026'
+ANTHONY_EDWARDS_URL = 'https://www.basketball-reference.com/players/e/edwaran01.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Clippers': 'LA Clippers',
@@ -80,8 +81,8 @@ COLS_MAP = {
     'Who will end up with the 6 seed in the Eastern Conference?': 'Eastern_6',
     'Who will end up with the 7 seed in the Eastern Conference?': 'Eastern_7',
     'Who will end up with the 8 seed in the Eastern Conference?': 'Eastern_8',
-    'Daddy can only get you so far: How many regular season NBA games will Bronny James play in?': 'Tiebreaker_1',
-    'Wembanyama? More like Wemban-NO-ma: How many total blocks will Victor Wembanyama make during the regular season?': 'Tiebreaker_2',
+    'Step aside, little bro: How many regular season Golden State Warriors games will both Steph Curry and Seth Curry appear in?': 'Tiebreaker_1',
+    r"You miss 100% of the shots you don't take (and ~60% of the ones you do)?: How many total three pointers will Anthony Edwards miss during the regular season?": 'Tiebreaker_2',
     'Did you do it yet?': 'paid',
     'Are picks valid?': 'are_picks_valid',
     "Bettor or media?": "Picks Source"
@@ -101,7 +102,7 @@ def get_conference_standings(standings_tbl):
     cols = {'W-L', 'PCT', 'GB'}
     col_locs = {'Rank': 0,
                 'Team': 1}
-    for col in standings_tbl.findAll('th'):
+    for col in standings_tbl.find_all('th'):
         colspan = col.get('colspan', 1)
         i += int(colspan)
         content = col.text.strip()
@@ -110,12 +111,12 @@ def get_conference_standings(standings_tbl):
 
     # extract standings
     data = []
-    for i, row in enumerate(standings_tbl.findAll('tr')):
+    for i, row in enumerate(standings_tbl.find_all('tr')):
         if i == 0: # skip header row
             continue
         
         entry = {}
-        cells = row.findAll('td')
+        cells = row.find_all('td')
         for stat, loc in col_locs.items():
             entry[stat] = cells[loc].text.strip().rstrip('XYZ')
         
@@ -151,7 +152,7 @@ def get_standings(url):
     r.raise_for_status()
 
     soup = BeautifulSoup(r.content, 'html.parser')
-    eastern_html, western_html = soup.findAll('table', class_='data-table')
+    eastern_html, western_html = soup.find_all('table', class_='data-table')
 
     eastern_df = get_conference_standings(eastern_html)
     western_df = get_conference_standings(western_html)
@@ -199,6 +200,50 @@ def parse_bbref_player_pg(url, row_id, stat_id, fxn=str):
 
     return fxn(season_val)
 
+def parse_bbref_player_season_game_log(url, stat_ids, fxns=None):
+    '''
+    Retrieve every regular season game played from a player's Basketball
+    Reference game log for a particular season.
+
+    Inputs:
+    url (str): web address of the player's profile with the stat
+    stat_ids (iterable of str): data-stat attributes to pull
+    fxn (iterab le of function): function to cast the parsed stat to
+
+    Returns: fxn (by default str)
+    '''
+    if not fxns:
+        fxns = [str] * len(stat_ids)
+
+    r = requests.get(url)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.content, 'html.parser')
+    data_table = soup.find('table', id='player_game_log_reg')
+
+    try:
+        data_rows = (
+            data_table
+            .find('tbody')
+            .find_all('tr')
+        )
+    except AttributeError as e:
+        return [{x: float('nan') for x in stat_ids}]
+
+    parsed_rows = []
+    for data_row in data_rows:
+        parsed_row = {}
+        stats = (
+            data_row
+            .find_all('td', {'data-stat': lambda x: x in stat_ids})
+        )
+        for i, stat in enumerate(stats):
+            parsed_row[stat['data-stat']] = fxns[i](stat.text.strip())
+
+        parsed_rows.append(parsed_row)
+
+    return parsed_rows
+
 def parse_bbref_mvp_tracker(url, player, fxn=str):
     '''
     Retrieve a player's current standing in the Basketball Reference MVP
@@ -221,7 +266,7 @@ def parse_bbref_mvp_tracker(url, player, fxn=str):
     table_body = data_table.find('tbody')
 
 
-    for row in table_body.findAll('tr', ):
+    for row in table_body.find_all('tr', ):
         ranking = row.find('th', {'data-stat': 'ranker'}).text
         player_col = row.find('td', {'data-stat': 'player'})
         player_name = player_col.text
@@ -576,10 +621,38 @@ if __name__ == '__main__':
         update_timestamps['Standings'] = None
 
     try:
-        tiebreaker_1_text = "Bronny James games played"
-        tiebreaker_1_value =  parse_bbref_player_pg(
-            BRONNY_URL, 'totals_stats.2025', 'games', int
+        tiebreaker_1_text = "Steph Curry + Seth Curry GSW games played"
+        game_log_stat_ids = [
+            'player_game_num_career', 'team_game_num_season', 'team_name_abbr'
+        ]
+        steph_curry_game_log = pd.DataFrame(
+            parse_bbref_player_season_game_log(
+                STEPH_CURRY_GAME_LOG_URL, game_log_stat_ids
+            )
         )
+        seth_curry_game_log = pd.DataFrame(
+            parse_bbref_player_season_game_log(
+                SETH_CURRY_GAME_LOG_URL, game_log_stat_ids
+            )
+        )
+        for game_log in [steph_curry_game_log, seth_curry_game_log]:
+            game_log.drop(
+                (
+                    game_log
+                    [
+                        (game_log.player_game_num_career.isna()) |
+                        (game_log.player_game_num_career == '') |
+                        (game_log.team_name_abbr != 'GSW')
+                    ]
+                    .index
+                ),
+                axis=0,
+                inplace=True
+            )
+        joint_game_log = steph_curry_game_log.merge(
+            seth_curry_game_log, on='team_game_num_season', how='inner'
+        )
+        tiebreaker_1_value =  len(joint_game_log)
         update_timestamps['Tiebreaker #1'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 1 error: {e}')
@@ -587,10 +660,14 @@ if __name__ == '__main__':
         update_timestamps['Tiebreaker #1'] = None
 
     try:
-        tiebreaker_2_text = "Wembanyama total blocks"
-        tiebreaker_2_value = parse_bbref_player_pg(
-            WEMBANYAMA_URL, 'totals_stats.2025', 'blk', int
+        tiebreaker_2_text = "Anthony Edwards missed 3PA"
+        kat_3pa = parse_bbref_player_pg(
+            ANTHONY_EDWARDS_URL, 'totals_stats.2026', 'fg3a', int
         )
+        kat_3pm = parse_bbref_player_pg(
+            ANTHONY_EDWARDS_URL, 'totals_stats.2026', 'fg3', int
+        )
+        tiebreaker_2_value = kat_3pa - kat_3pm
         update_timestamps['Tiebreaker #2'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 2 error: {e}')
@@ -616,6 +693,7 @@ if __name__ == '__main__':
         ws = wb.worksheet(responses_ws_name)
         standings_picks_df, tiebreaker_picks_df = parse_picks_ws(ws)
     except Exception as e:
+        raise e
         print(f'Response parsing error: {e}')
         picks_df, tiebreaks_df = None, None
 
@@ -625,6 +703,7 @@ if __name__ == '__main__':
         )
         update_timestamps['Standings Picks'] = datetime.now(tz=pytz.utc)
     except Exception as e:
+        raise e
         print(f'Standings picks write error: {e}')
         update_timestamps['Standings Picks'] = None
 
