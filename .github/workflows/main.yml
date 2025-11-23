@@ -50,7 +50,3 @@ jobs:
           RESPONSE_WS_NAME: ${{ secrets.RESPONSE_WS_NAME }}
       - name: execute script
         run: python nba_sheets.py
-        
-      # keepalive workflow prevents inactivity-based disables of github actions
-      - name: autocommit
-        uses: gautamkrishnar/keepalive-workflow@v1 
