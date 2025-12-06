@@ -38,5 +38,5 @@ six==1.17.0
 soupsieve==2.8
 tornado==6.5.2
 traitlets==5.14.3
-urllib3==2.5.0
+urllib3==2.6.0
 wcwidth==0.2.14
