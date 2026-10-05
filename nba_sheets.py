@@ -5,12 +5,15 @@ A small script to update a Google Sheet w/ NBA standings.
 Ben Fogarty
 Created: 2 December 2020
 
-Last updated: 13 November 2021
+Last updated: 05 October 2026
+
+TODO: Switch tie-breaker URLs / tags to 2027
 '''
 
 import json
 import logging
 from datetime import datetime
+from io import StringIO
 
 from bs4 import BeautifulSoup
 import gspread
@@ -25,9 +28,8 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-STEPH_CURRY_GAME_LOG_URL = 'https://www.basketball-reference.com/players/c/curryst01/gamelog/2026'
-SETH_CURRY_GAME_LOG_URL = 'https://www.basketball-reference.com/players/c/curryse01/gamelog/2026'
-ANTHONY_EDWARDS_URL = 'https://www.basketball-reference.com/players/e/edwaran01.html'
+CLIPPERS_SEASON_URL = 'https://www.basketball-reference.com/teams/LAC/2026_games.html'
+LAMELO_BALL_URL = 'https://www.basketball-reference.com/players/b/ballla01.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
              'Clippers': 'LA Clippers',
@@ -81,11 +83,11 @@ COLS_MAP = {
     'Who will end up with the 6 seed in the Eastern Conference?': 'Eastern_6',
     'Who will end up with the 7 seed in the Eastern Conference?': 'Eastern_7',
     'Who will end up with the 8 seed in the Eastern Conference?': 'Eastern_8',
-    'Step aside, little bro: How many regular season Golden State Warriors games will both Steph Curry and Seth Curry appear in?': 'Tiebreaker_1',
-    r"You miss 100% of the shots you don't take (and ~60% of the ones you do)?: How many total three pointers will Anthony Edwards miss during the regular season?": 'Tiebreaker_2',
+    r'No show jobs, no show fan?: What will be the average attendance at Clipper\'s regular season home games?': 'Tiebreaker_1',
+    r"LaMelo take the wheel: What will LaMelo's usage rate be for the 2026-2027 season?": 'Tiebreaker_2',
     'Did you do it yet?': 'paid',
     'Are picks valid?': 'are_picks_valid',
-    "Bettor or media?": "Picks Source"
+    "Participant or media?": "Picks Source"
 }
 
 def get_conference_standings(standings_tbl):
@@ -169,14 +171,13 @@ def get_standings(url):
 
     return standings_df
 
-def parse_bbref_player_pg(url, row_id, stat_id, fxn=str):
+def parse_bbref_player_pg(url, table_id, row_id, stat_id, fxn=str):
     '''
     Retrieve season totals from player Basketball Reference pages.
 
-    ** Not in use since 2022-23 **
-
     Inputs:
     url (str): web address of the player's profile with the stat
+    table_id (str): id of the table to pull data from
     row_id (str): id of the row to pull data from
     stat_id (str): data-stat attribute to pull
     fxn (function): function to cast the parsed stat to
@@ -187,7 +188,7 @@ def parse_bbref_player_pg(url, row_id, stat_id, fxn=str):
     r.raise_for_status()
 
     soup = BeautifulSoup(r.content, 'html.parser')
-    data_table = soup.find('table', id='totals_stats')
+    data_table = soup.find('table', id=table_id)
 
     season_val = (
         data_table
@@ -199,6 +200,33 @@ def parse_bbref_player_pg(url, row_id, stat_id, fxn=str):
     )
 
     return fxn(season_val)
+
+def parse_bbref_team_home_attendance(url):
+    '''
+    Retrieve average home attendance from a team's Basketball Reference page.
+
+    Inputs:
+    url (str): web address of the team's season page
+    row_id (str): id of the row to pull data from
+    stat_id (str): data-stat attribute to pull
+    fxn (function): function to cast the parsed stat to
+
+    Returns: fxn (by default str)
+    '''
+    df = pd.read_html(url, attrs={"id": "games"})[0]
+    
+    df = df[df['G'] != 'G'] # remove repeated header rows
+    df_dtypes = {'Attend.': int, 'G': int}
+    df = df.astype(df_dtypes)
+
+    completed_regular_season_home_games_mask = (
+        (df['Unnamed: 7'].notna()) & # remove games that have not been played yet
+        (df['Unnamed: 5'] != '@') & # remove away games
+        (df['G'] <= 82) # remove play-in / play-off games
+    )
+    df = df[completed_regular_season_home_games_mask]
+
+    return df['Attend.'].mean()
 
 def parse_bbref_player_season_game_log(url, stat_ids, fxns=None):
     '''
@@ -365,7 +393,7 @@ def summarize_standings_picks(standings_df, standings_picks_df):
     Returns: pd.DataFrame
     """
     standings_picks_df = standings_picks_df.loc[
-        standings_picks_df['Picks Source'] == "Bettor", :
+        standings_picks_df['Picks Source'] == "Participant", :
     ]
 
     standings_df = standings_df.loc[:, ['Conference', 'Team']].drop_duplicates()
@@ -621,38 +649,8 @@ if __name__ == '__main__':
         update_timestamps['Standings'] = None
 
     try:
-        tiebreaker_1_text = "Steph Curry + Seth Curry GSW games played"
-        game_log_stat_ids = [
-            'player_game_num_career', 'team_game_num_season', 'team_name_abbr'
-        ]
-        steph_curry_game_log = pd.DataFrame(
-            parse_bbref_player_season_game_log(
-                STEPH_CURRY_GAME_LOG_URL, game_log_stat_ids
-            )
-        )
-        seth_curry_game_log = pd.DataFrame(
-            parse_bbref_player_season_game_log(
-                SETH_CURRY_GAME_LOG_URL, game_log_stat_ids
-            )
-        )
-        for game_log in [steph_curry_game_log, seth_curry_game_log]:
-            game_log.drop(
-                (
-                    game_log
-                    [
-                        (game_log.player_game_num_career.isna()) |
-                        (game_log.player_game_num_career == '') |
-                        (game_log.team_name_abbr != 'GSW')
-                    ]
-                    .index
-                ),
-                axis=0,
-                inplace=True
-            )
-        joint_game_log = steph_curry_game_log.merge(
-            seth_curry_game_log, on='team_game_num_season', how='inner'
-        )
-        tiebreaker_1_value =  len(joint_game_log)
+        tiebreaker_1_text = "Clippers average home attendance"
+        tiebreaker_1_value = parse_bbref_team_home_attendance(CLIPPERS_SEASON_URL)
         update_timestamps['Tiebreaker #1'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 1 error: {e}')
@@ -660,14 +658,10 @@ if __name__ == '__main__':
         update_timestamps['Tiebreaker #1'] = None
 
     try:
-        tiebreaker_2_text = "Anthony Edwards missed 3PA"
-        kat_3pa = parse_bbref_player_pg(
-            ANTHONY_EDWARDS_URL, 'totals_stats.2026', 'fg3a', int
+        tiebreaker_2_text = "LaMelo Ball usage rate"
+        tiebreaker_2_value = parse_bbref_player_pg(
+            LAMELO_BALL_URL, 'advanced', 'advanced.2026', 'usg_pct', float
         )
-        kat_3pm = parse_bbref_player_pg(
-            ANTHONY_EDWARDS_URL, 'totals_stats.2026', 'fg3', int
-        )
-        tiebreaker_2_value = kat_3pa - kat_3pm
         update_timestamps['Tiebreaker #2'] = datetime.now(tz=pytz.utc)
     except Exception as e:
         print(f'Tiebreaker 2 error: {e}')
