@@ -5,7 +5,7 @@ A small script to update a Google Sheet w/ NBA standings.
 Ben Fogarty
 Created: 2 December 2020
 
-Last updated: 05 October 2026
+Last updated: 21 October 2026
 
 TODO: Switch tie-breaker URLs / tags to 2027
 '''
@@ -28,7 +28,7 @@ with open('sheet_info.json', 'r') as f:
 REF_LINK = 'https://github.com/fogarty-ben/nba-sheets/'
 
 STANDINGS_FS_URL = 'https://www.foxsports.com/nba/standings'
-CLIPPERS_SEASON_URL = 'https://www.basketball-reference.com/teams/LAC/2026_games.html'
+CLIPPERS_SEASON_URL = 'https://www.basketball-reference.com/teams/LAC/2027_games.html'
 LAMELO_BALL_URL = 'https://www.basketball-reference.com/players/b/ballla01.html'
 
 NAMES_MAP = {'Lakers': 'Los Angeles Lakers',
@@ -204,6 +204,8 @@ def parse_bbref_player_pg(url, table_id, row_id, stat_id, fxn=str):
 def parse_bbref_team_home_attendance(url):
     '''
     Retrieve average home attendance from a team's Basketball Reference page.
+
+    TODO: Abstract to pull any stat from team page.
 
     Inputs:
     url (str): web address of the team's season page
@@ -660,7 +662,7 @@ if __name__ == '__main__':
     try:
         tiebreaker_2_text = "LaMelo Ball usage rate"
         tiebreaker_2_value = parse_bbref_player_pg(
-            LAMELO_BALL_URL, 'advanced', 'advanced.2026', 'usg_pct', float
+            LAMELO_BALL_URL, 'advanced', 'advanced.2027', 'usg_pct', float
         )
         update_timestamps['Tiebreaker #2'] = datetime.now(tz=pytz.utc)
     except Exception as e:
