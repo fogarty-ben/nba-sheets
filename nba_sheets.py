@@ -218,7 +218,7 @@ def parse_bbref_team_home_attendance(url):
     df = pd.read_html(url, attrs={"id": "games"})[0]
     
     df = df[df['G'] != 'G'] # remove repeated header rows
-    df_dtypes = {'Attend.': int, 'G': int}
+    df_dtypes = {'Attend.': 'Int64', 'G': int}
     df = df.astype(df_dtypes)
 
     completed_regular_season_home_games_mask = (
