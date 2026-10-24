@@ -83,7 +83,7 @@ COLS_MAP = {
     'Who will end up with the 6 seed in the Eastern Conference?': 'Eastern_6',
     'Who will end up with the 7 seed in the Eastern Conference?': 'Eastern_7',
     'Who will end up with the 8 seed in the Eastern Conference?': 'Eastern_8',
-    r'No show jobs, no show fan?: What will be the average attendance at Clipper\'s regular season home games?': 'Tiebreaker_1',
+    "No show jobs, no show fan?: What will be the average attendance at Clipper's regular season home games?": 'Tiebreaker_1',
     r"LaMelo take the wheel: What will LaMelo's usage rate be for the 2026-2027 season?": 'Tiebreaker_2',
     'Did you do it yet?': 'paid',
     'Are picks valid?': 'are_picks_valid',
